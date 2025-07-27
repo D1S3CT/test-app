@@ -1,18 +1,19 @@
 const express = require('express')
 const cors = require('cors')
+const path = require('path')
 const { faker } = require('@faker-js/faker')
 
 const app = express()
-const PORT = 3001
+const PORT = process.env.PORT || 3001
 
-// В развернутом проекте можно вынести storage в отдельный файл
+// Временное хранилище в памяти
 const storage = {
   records: [],
-  selectionSet: new Set(), // выбранные id
-  sortOrder: [], // массив id в пользовательском порядке
+  selectionSet: new Set(),
+  sortOrder: [],
 }
 
-// Генерация 1 000 000 записей при старте
+// Генерация записей
 function generateRecords() {
   const records = []
   for (let i = 1; i <= 1_000_000; i++) {
@@ -31,7 +32,12 @@ storage.records = generateRecords()
 app.use(cors())
 app.use(express.json())
 
-// Помощь для фильтрации по строке (поиск)
+// Отдача статических файлов из client/my-vue-app/dist
+const staticPath = path.join(__dirname, '..', 'client', 'my-vue-app', 'dist')
+app.use(express.static(staticPath))
+
+// --- API маршруты ---
+
 function filterRecords(records, search) {
   if (!search) return records
   const lowerSearch = search.toLowerCase()
@@ -44,27 +50,20 @@ function filterRecords(records, search) {
   )
 }
 
-// Сортировка с учётом сохранённого порядка
 function sortRecords(records, sortOrder) {
   if (!sortOrder || sortOrder.length === 0) return records
 
-  // Создать индекс для быстрого поиска позиции в sortOrder
   const orderIndex = new Map()
   sortOrder.forEach((id, idx) => orderIndex.set(id, idx))
 
-  // Сортировать: записи с id в sortOrder идут в порядке sortOrder,
-  // остальные идут в конце (по id)
   return [...records].sort((a, b) => {
     const posA = orderIndex.has(a.id) ? orderIndex.get(a.id) : Infinity
     const posB = orderIndex.has(b.id) ? orderIndex.get(b.id) : Infinity
     if (posA !== posB) return posA - posB
-
-    // Для элементов вне списка сортируем по id
     return a.id - b.id
   })
 }
 
-// GET /api/records?page=1&limit=20&search=&sortOrder=1,2,3,...
 app.get('/api/records', (req, res) => {
   const page = Math.max(parseInt(req.query.page) || 1, 1)
   const limit = Math.min(parseInt(req.query.limit) || 20, 100)
@@ -78,16 +77,12 @@ app.get('/api/records', (req, res) => {
       .filter((id) => !isNaN(id))
   }
 
-  // Фильтрация по поиску
   let filtered = filterRecords(storage.records, search)
-
-  // Сортировка по клиентскому порядку (переопределяет порядок)
   filtered = sortRecords(
     filtered,
     clientSortOrder.length > 0 ? clientSortOrder : storage.sortOrder
   )
 
-  // Пагинация
   const totalRecords = filtered.length
   const totalPages = Math.ceil(totalRecords / limit)
   const startIndex = (page - 1) * limit
@@ -104,7 +99,6 @@ app.get('/api/records', (req, res) => {
   })
 })
 
-// POST /api/state/selection  { selectedIds: [1,2,3] }
 app.post('/api/state/selection', (req, res) => {
   const { selectedIds } = req.body
   if (!Array.isArray(selectedIds)) {
@@ -116,7 +110,6 @@ app.post('/api/state/selection', (req, res) => {
   res.json({ success: true })
 })
 
-// POST /api/state/sortorder  { sortOrder: [1,2,3,...] }
 app.post('/api/state/sortorder', (req, res) => {
   const { sortOrder } = req.body
   if (!Array.isArray(sortOrder)) {
@@ -126,12 +119,22 @@ app.post('/api/state/sortorder', (req, res) => {
   res.json({ success: true })
 })
 
-// GET /api/state - получить текущее состояние (выбор + сортировка)
 app.get('/api/state', (req, res) => {
   res.json({
     selectedIds: Array.from(storage.selectionSet),
     sortOrder: storage.sortOrder,
   })
+})
+
+// --- Отдача React-приложения для не-API маршрутов ---
+
+app.get('/*splat', (req, res) => {
+  // Если путь начинается с /api — вернуть 404, чтобы не мешать API
+  if (req.path.startsWith('/api')) {
+    return res.status(404).send('API route not found')
+  }
+  // Отдаём index.html React-приложения
+  res.sendFile(path.join(staticPath, 'index.html'))
 })
 
 app.listen(PORT, () => {
