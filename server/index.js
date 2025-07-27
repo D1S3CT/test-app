@@ -5,6 +5,7 @@ const { faker } = require('@faker-js/faker')
 
 const app = express()
 const PORT = process.env.PORT || 3001
+const HOST = '0.0.0.0'
 
 // Временное хранилище в памяти
 const storage = {
@@ -12,6 +13,10 @@ const storage = {
   selectionSet: new Set(),
   sortOrder: [],
 }
+
+app.listen(PORT, HOST, () => {
+  console.log(`Server running on http://${HOST}:${PORT}`)
+})
 
 // Генерация записей
 function generateRecords() {
